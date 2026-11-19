@@ -2073,7 +2073,7 @@ mod tests {
     use std::{
         collections::BTreeMap,
         io,
-        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4},
+        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
         str::FromStr,
         sync::Arc,
         time::{Duration, Instant},
@@ -2123,6 +2123,74 @@ mod tests {
         let err = res.err().unwrap();
         assert!(err.to_string().starts_with("Connecting to ourself"));
 
+        Ok(())
+    }
+
+    /// Dials the server only at one of this machine's IPv6 link-local
+    /// addresses, with its scope id. Without the scope id the address can't be
+    /// routed, so this only works if iroh keeps it (#4584).
+    #[tokio::test]
+    #[traced_test]
+    async fn connect_ipv6_link_local() -> Result {
+        let interfaces = netwatch::interfaces::State::new().await;
+        let link_local = interfaces
+            .interfaces
+            .values()
+            .filter(|iface| iface.is_up())
+            .flat_map(|iface| iface.addrs())
+            .find_map(|net| match net {
+                netwatch::interfaces::IpNet::V6 { net, scope_id, .. }
+                    if net.addr().is_unicast_link_local() && scope_id != 0 =>
+                {
+                    Some((net.addr(), scope_id))
+                }
+                _ => None,
+            });
+        let Some((ip, scope_id)) = link_local else {
+            println!("skipping: no interface with an IPv6 link-local address");
+            return Ok(());
+        };
+
+        let server = Endpoint::builder(presets::Minimal)
+            .alpns(vec![TEST_ALPN.to_vec()])
+            .bind()
+            .await?;
+        let Some(port) = server
+            .bound_sockets()
+            .iter()
+            .find(|addr| addr.is_ipv6())
+            .map(|addr| addr.port())
+        else {
+            println!("skipping: no IPv6 socket");
+            return Ok(());
+        };
+        let server_id = server.id();
+        let server_task = tokio::spawn(async move {
+            let conn = server.accept().await.anyerr()?.await.anyerr()?;
+            let mut stream = conn.accept_uni().await.anyerr()?;
+            let received = stream.read_to_end(16).await.anyerr()?;
+            conn.close(0u8.into(), b"done");
+            server.close().await;
+            Ok::<_, Error>(received)
+        });
+
+        let client = Endpoint::builder(presets::Minimal).bind().await?;
+        let addr = EndpointAddr::from_parts(
+            server_id,
+            [TransportAddr::Ip(SocketAddr::V6(SocketAddrV6::new(
+                ip, port, 0, scope_id,
+            )))],
+        );
+        info!(%addr.id, ?addr.addrs, "dialing link-local only");
+        let conn = time::timeout(Duration::from_secs(10), client.connect(addr, TEST_ALPN))
+            .await
+            .anyerr()??;
+        let mut stream = conn.open_uni().await.anyerr()?;
+        stream.write_all(b"hello").await.anyerr()?;
+        stream.finish().anyerr()?;
+
+        assert_eq!(server_task.await.anyerr()??, b"hello");
+        client.close().await;
         Ok(())
     }
 
