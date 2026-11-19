@@ -948,7 +948,7 @@ impl State {
             Ok(remote_candidates) => {
                 let remote_candidates = remote_candidates
                     .iter()
-                    .map(|addr| SocketAddr::new(addr.ip().to_canonical(), addr.port()))
+                    .map(|addr| crate::socket::transports::canonical_socket_addr(*addr))
                     .collect();
                 event!(
                     target: "iroh::_events::qnt::init",
