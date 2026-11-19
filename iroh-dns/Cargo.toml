@@ -9,8 +9,15 @@ repository = "https://github.com/n0-computer/iroh"
 keywords = ["networking", "pkarr", "dns", "iroh"]
 rust-version = "1.91"
 
-[lints]
-workspace = true
+# Copied from [workspace.lints] instead of `workspace = true`, so the crate
+# builds when vendored out of the workspace (dream2nix doesn't resolve
+# inherited lints). Keep in sync with the root Cargo.toml.
+[lints.rust]
+missing_debug_implementations = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(iroh_docsrs)", "cfg(iroh_loom)", "cfg(skip_patchbay)"] }
+
+[lints.clippy]
+unused_async = "warn"
 
 [dependencies]
 arc-swap = "1.9.1"

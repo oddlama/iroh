@@ -17,8 +17,15 @@ rust-version = "1.91"
 # It would be nice if we could make this target-dependent, but we can't (yet): https://github.com/rust-lang/cargo/issues/12260
 crate-type = ["lib", "cdylib"]
 
-[lints]
-workspace = true
+# Copied from [workspace.lints] instead of `workspace = true`, so the crate
+# builds when vendored out of the workspace (dream2nix doesn't resolve
+# inherited lints). Keep in sync with the root Cargo.toml.
+[lints.rust]
+missing_debug_implementations = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(iroh_docsrs)", "cfg(iroh_loom)", "cfg(skip_patchbay)"] }
+
+[lints.clippy]
+unused_async = "warn"
 
 [dependencies]
 backon = { version = "1.4" }
